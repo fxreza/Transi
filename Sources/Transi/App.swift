@@ -1,7 +1,7 @@
 import AppKit
 
 @main
-struct QTranslateApp {
+struct TransiApp {
     @MainActor
     static func main() {
         let app = NSApplication.shared

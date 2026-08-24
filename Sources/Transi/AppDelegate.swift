@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotkeyManager.shared.registerScreenshotHotkey { [weak self] in
             Task { @MainActor in self?.captureScreenshotAndTranslate() }
         }
+        HotkeyManager.shared.registerSpeakSelectionHotkey { [weak self] in
+            Task { @MainActor in self?.speakCurrentSelection() }
+        }
     }
 
     // MARK: - Accessibility permission
@@ -29,14 +32,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The system's own permission alerts are shown at most once per app, so on
+    /// any launch after the first the only way to get the user to the right pane
+    /// is to open it ourselves. Menu items do that on demand.
+    @objc private func menuOpenAccessibilitySettings() {
+        SystemSettingsPane.accessibility.open()
+    }
+
+    @objc private func menuOpenScreenRecordingSettings() {
+        SystemSettingsPane.screenRecording.open()
+    }
+
     // MARK: - Status item
 
     private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // squareLength + a dedicated autosaveName, rather than variableLength and
+        // the generic "Item-0" slot: the icon then asks for the least width it can
+        // and remembers its own position, which is what keeps it from being the
+        // first item macOS drops when the menu bar runs out of room. isVisible is
+        // set explicitly so a stale hidden state can never carry over.
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem.autosaveName = "TransiStatusItem"
+        statusItem.isVisible = true
         if let button = statusItem.button {
             button.image = NSImage(
                 systemSymbolName: "character.bubble",
-                accessibilityDescription: "QTranslate")
+                accessibilityDescription: "Transi")
         }
 
         let menu = NSMenu()
@@ -55,10 +76,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let screenshotItem = NSMenuItem(
             title: "Capture Screenshot to Translate",
             action: #selector(menuCaptureScreenshot),
-            keyEquivalent: "s")
+            keyEquivalent: "d")
         screenshotItem.keyEquivalentModifierMask = .option
         screenshotItem.target = self
         menu.addItem(screenshotItem)
+
+        let speakItem = NSMenuItem(
+            title: "Read Selection Aloud",
+            action: #selector(menuSpeakSelection),
+            keyEquivalent: "s")
+        speakItem.keyEquivalentModifierMask = .option
+        speakItem.target = self
+        menu.addItem(speakItem)
 
         menu.addItem(.separator())
 
@@ -79,8 +108,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        let permissionsItem = NSMenuItem(title: "Permissions", action: nil, keyEquivalent: "")
+        let permissionsMenu = NSMenu()
+        for (title, action) in [
+            ("Open Accessibility Settings", #selector(menuOpenAccessibilitySettings)),
+            ("Open Screen Recording Settings", #selector(menuOpenScreenRecordingSettings)),
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            permissionsMenu.addItem(item)
+        }
+        permissionsItem.submenu = permissionsMenu
+        menu.addItem(permissionsItem)
+
+        menu.addItem(.separator())
+
         let quitItem = NSMenuItem(
-            title: "Quit QTranslate",
+            title: "Quit Transi",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q")
         menu.addItem(quitItem)
@@ -95,6 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuCaptureScreenshot() {
         captureScreenshotAndTranslate()
+    }
+
+    @objc private func menuSpeakSelection() {
+        speakCurrentSelection()
     }
 
     @objc private func selectTargetLanguage(_ sender: NSMenuItem) {
@@ -126,13 +174,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Reads the current selection aloud with an English voice. Language
+    /// auto-detection mis-reads short English words ("Concise" as French, say),
+    /// so this hotkey always pronounces English. Pressing the hotkey again while
+    /// speech is in progress stops it, so the same key both starts and cancels.
+    private func speakCurrentSelection() {
+        if SpeechService.shared.isSpeaking {
+            SpeechService.shared.stop()
+            return
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        Task { @MainActor in
+            guard let text = await TextCapture.selectedText() else {
+                popup.show(error: "No text selected.", near: mouseLocation)
+                return
+            }
+            SpeechService.shared.speakEnglish(text)
+        }
+    }
+
     private func captureScreenshotAndTranslate() {
         guard ScreenCaptureManager.shared.hasPermission else {
             ScreenCaptureManager.shared.requestPermissionIfNeeded()
             popup.show(
                 error: "Screen Recording permission is needed for screenshot translate. "
-                    + "Grant it in System Settings → Privacy & Security → Screen Recording, "
-                    + "then try ⌥S again.",
+                    + "Enable Transi in the list, then try ⌥D again.",
+                settingsPane: .screenRecording,
                 near: NSEvent.mouseLocation)
             return
         }

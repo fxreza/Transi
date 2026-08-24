@@ -171,7 +171,7 @@ image.unlockFocus()
 
 let root = URL(fileURLWithPath: CommandLine.arguments.first!)
     .deletingLastPathComponent().deletingLastPathComponent()
-let iconset = root.appendingPathComponent("build/AppIcon.iconset")
+let iconset = root.appendingPathComponent("build.noindex/AppIcon.iconset")
 try? FileManager.default.removeItem(at: iconset)
 try! FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 
@@ -206,7 +206,7 @@ task.waitUntilExit()
 guard task.terminationStatus == 0 else { fatalError("iconutil failed") }
 
 // Keep a full-size preview around; handy for README and for eyeballing changes.
-let previewURL = root.appendingPathComponent("build/AppIcon-preview.png")
+let previewURL = root.appendingPathComponent("build.noindex/AppIcon-preview.png")
 if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
    let png = rep.representation(using: .png, properties: [:]) {
     try! png.write(to: previewURL)

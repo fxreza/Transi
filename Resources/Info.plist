@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>QTranslate</string>
+	<string>Transi</string>
 	<key>CFBundleDisplayName</key>
-	<string>QTranslate</string>
+	<string>Transi</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.sam.qtranslate-mac</string>
+	<string>com.fxreza.transi</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleExecutable</key>
-	<string>QTranslateMac</string>
+	<string>Transi</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
@@ -25,6 +25,6 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>QTranslate uses AppleScript to read the selected text from browsers like Safari.</string>
+	<string>Transi uses AppleScript to read the selected text from browsers like Safari.</string>
 </dict>
 </plist>

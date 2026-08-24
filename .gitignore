@@ -1,6 +1,6 @@
 # SwiftPM build products
 .build/
-build/
+build.noindex/
 
 # Local code-signing material (see README > "Permissions survive rebuilds").
 # The certificate is per-machine; each developer creates their own.

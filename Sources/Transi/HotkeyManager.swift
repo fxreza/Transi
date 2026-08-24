@@ -21,8 +21,13 @@ final class HotkeyManager {
         register(keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(optionKey), handler: handler)
     }
 
-    /// Register ⌥S as the global screenshot-OCR-translate hotkey.
+    /// Register ⌥D as the global screenshot-OCR-translate hotkey.
     func registerScreenshotHotkey(_ handler: @escaping () -> Void) {
+        register(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey), handler: handler)
+    }
+
+    /// Register ⌥S as the global read-selection-aloud hotkey.
+    func registerSpeakSelectionHotkey(_ handler: @escaping () -> Void) {
         register(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey), handler: handler)
     }
 
@@ -32,7 +37,7 @@ final class HotkeyManager {
 
         let id = nextID
         nextID += 1
-        let hotKeyID = EventHotKeyID(signature: OSType(0x5154_524E), id: id)  // 'QTRN'
+        let hotKeyID = EventHotKeyID(signature: OSType(0x5452_4E53), id: id)  // 'TRNS'
 
         var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(

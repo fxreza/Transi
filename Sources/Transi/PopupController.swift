@@ -20,6 +20,9 @@ final class PopupController: ObservableObject {
     @Published var isAILoading: Bool = false
     @Published var isOCRLoading: Bool = false
     @Published var errorMessage: String?
+    /// Set alongside `errorMessage` when the failure is a missing permission,
+    /// so the popup can offer a button straight to the relevant settings pane.
+    @Published var errorSettingsPane: SystemSettingsPane?
     @Published var effectiveTarget: TargetLanguage = .persian
 
     private var panel: TranslationPanel?
@@ -44,6 +47,7 @@ final class PopupController: ObservableObject {
         spellingSuggestion = nil
         dictionary = []
         errorMessage = nil
+        errorSettingsPane = nil
         isCapturing = true
         isLoading = false
         isAILoading = false
@@ -59,6 +63,7 @@ final class PopupController: ObservableObject {
         spellingSuggestion = nil
         dictionary = []
         errorMessage = nil
+        errorSettingsPane = nil
         isCapturing = false
         isLoading = true
         isAILoading = false
@@ -75,6 +80,7 @@ final class PopupController: ObservableObject {
         spellingSuggestion = nil
         dictionary = []
         errorMessage = nil
+        errorSettingsPane = nil
         isCapturing = false
         isLoading = false
         isAILoading = false
@@ -83,10 +89,13 @@ final class PopupController: ObservableObject {
         presentPanel(near: location)
     }
 
-    func show(error: String, near location: NSPoint) {
+    func show(
+        error: String, settingsPane: SystemSettingsPane? = nil, near location: NSPoint
+    ) {
         sourceText = ""
         translatedText = ""
         errorMessage = error
+        errorSettingsPane = settingsPane
         isCapturing = false
         isLoading = false
         isOCRLoading = false
@@ -113,6 +122,7 @@ final class PopupController: ObservableObject {
         isCapturing = false
         isLoading = true
         errorMessage = nil
+        errorSettingsPane = nil
 
         // Decide the auto-flip locally from the text's script where we can, so
         // "already in the target language" costs one request instead of two.

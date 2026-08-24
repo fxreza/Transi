@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "QTranslateMac",
+    name: "Transi",
     platforms: [
         .macOS(.v13)
     ],
@@ -11,11 +11,11 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "QTranslateMac",
+            name: "Transi",
             dependencies: [
                 "SelectedTextKit"
             ],
-            path: "Sources/QTranslateMac"
+            path: "Sources/Transi"
         )
     ]
 )

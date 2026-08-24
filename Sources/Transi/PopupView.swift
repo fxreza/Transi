@@ -10,10 +10,16 @@ struct PopupView: View {
             Divider()
 
             if let error = controller.errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                VStack(spacing: 10) {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                    if let pane = controller.errorSettingsPane {
+                        Button(pane.buttonTitle) { pane.open() }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 content
             }
@@ -35,7 +41,7 @@ struct PopupView: View {
 
     private var header: some View {
         HStack {
-            Text("QTranslate")
+            Text("Transi")
                 .font(.caption.bold())
                 .foregroundColor(.secondary)
 
