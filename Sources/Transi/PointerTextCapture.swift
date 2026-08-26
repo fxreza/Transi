@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import NaturalLanguage
 
 /// "Point-translate": reads whatever the mouse pointer is resting on when
 /// nothing is selected.
@@ -12,7 +13,7 @@ import CoreGraphics
 ///     app — a button, a label, an alert's message, a menu item. This is exact
 ///     text, costs a couple of cross-process calls, and works on things that
 ///     can't be selected at all.
-///  2. **OCR of a small region around the pointer.** The fallback for anything
+///  2. **OCR of a screen-wide strip around the pointer.** The fallback for anything
 ///     AX can't see: canvas-drawn UI, games, images, remote-desktop sessions.
 ///
 /// Returning `nil` is a normal outcome — the caller then opens the type-text
@@ -24,10 +25,12 @@ enum PointerTextCapture {
     /// whatever is left, so one wedged app can't leave the popup spinning.
     private static let totalBudget: TimeInterval = 2.0
 
-    /// Region OCR'd around the pointer, in points. Wide and short on purpose:
-    /// text runs horizontally, and a tall box would pull in the lines above
-    /// and below the one the user is actually pointing at.
-    private static let ocrRegion = CGSize(width: 480, height: 140)
+    /// Height of the strip OCR'd around the pointer, in points. The strip
+    /// spans the full screen width — anything narrower slices long lines
+    /// mid-word at the region edges, leaving fragments no sentence boundary
+    /// can be found in. The height only needs to hold the few neighboring
+    /// lines the sentence around the pointer can wrap across.
+    private static let ocrRegionHeight: CGFloat = 140
 
     /// Longest value we'll accept from a single element. A focused text area
     /// can hold a whole document; the user pointed at it, they didn't ask to
@@ -178,15 +181,14 @@ enum PointerTextCapture {
             ?? NSScreen.main
         else { return nil }
 
-        // Centered on the pointer, then slid (not cropped) back onto the
-        // pointer's screen so a pointer near an edge still gets a full-width
-        // strip of context rather than a sliver.
+        // Full screen width, vertically centered on the pointer, then slid
+        // (not cropped) back onto the pointer's screen so a pointer near the
+        // top or bottom edge still gets a full-height strip of context.
         var rect = NSRect(
-            x: location.x - ocrRegion.width / 2,
-            y: location.y - ocrRegion.height / 2,
-            width: ocrRegion.width,
-            height: ocrRegion.height)
-        rect.origin.x = min(max(rect.minX, screen.frame.minX), screen.frame.maxX - rect.width)
+            x: screen.frame.minX,
+            y: location.y - ocrRegionHeight / 2,
+            width: screen.frame.width,
+            height: ocrRegionHeight)
         rect.origin.y = min(max(rect.minY, screen.frame.minY), screen.frame.maxY - rect.height)
         rect = rect.intersection(screen.frame)
         guard rect.width > 8, rect.height > 8 else { return nil }
@@ -219,19 +221,85 @@ enum PointerTextCapture {
             x: (region.pointer.x - region.rect.minX) / region.rect.width,
             y: 1 - (region.pointer.y - region.rect.minY) / region.rect.height)
 
-        if let hit = lines.first(where: { $0.boundingBox.contains(normalized) }) {
-            return hit.text
-        }
-
-        // Nothing directly under the pointer: take the nearest line, but only
+        // The line under the pointer; failing that, the nearest line, but only
         // if it is close. A match at the far edge of the region is text the
         // user never aimed at, and a wrong translation is worse than the
         // input field opening.
-        let scored = lines
-            .map { ($0.text, distance(from: normalized, to: $0.boundingBox)) }
-            .min { $0.1 < $1.1 }
-        guard let scored, scored.1 <= 0.25 else { return nil }
-        return scored.0
+        let hit = lines.first(where: { $0.boundingBox.contains(normalized) })
+            ?? lines
+                .map { ($0, distance(from: normalized, to: $0.boundingBox)) }
+                .min { $0.1 < $1.1 }
+                .flatMap { $0.1 <= 0.25 ? $0.0 : nil }
+        guard let hit else { return nil }
+
+        return sentence(around: hit, pointer: normalized, in: lines)
+    }
+
+    /// Expands the pointed-at line to the *sentence* around the pointer: the
+    /// hit line is merged with the neighboring lines of its paragraph (small
+    /// vertical gap, horizontal overlap), the block is joined into one string,
+    /// and the sentence containing the pointer's position is cut out of it.
+    /// A bare line is a fragment cut at the wrap point; the sentence is what
+    /// the user actually means to translate.
+    private static func sentence(
+        around hit: OCRService.Line, pointer: CGPoint, in lines: [OCRService.Line]
+    ) -> String {
+        // Top-to-bottom reading order (Vision boxes are bottom-left-origin).
+        let ordered = lines.sorted { $0.boundingBox.midY > $1.boundingBox.midY }
+        guard let hitPos = ordered.firstIndex(where: {
+            $0.boundingBox == hit.boundingBox && $0.text == hit.text
+        }) else { return hit.text }
+
+        // Grow the paragraph block line by line in both directions.
+        var first = hitPos
+        var last = hitPos
+        while first > 0, sameParagraph(above: ordered[first - 1], below: ordered[first]) {
+            first -= 1
+        }
+        while last < ordered.count - 1, sameParagraph(above: ordered[last], below: ordered[last + 1]) {
+            last += 1
+        }
+
+        // Join the block into one string, remembering where the hit line sits.
+        var joined = ""
+        var hitRange: Range<String.Index>?
+        for index in first...last {
+            if !joined.isEmpty { joined.append(" ") }
+            let start = joined.endIndex
+            joined.append(ordered[index].text)
+            if index == hitPos { hitRange = start..<joined.endIndex }
+        }
+        guard let hitRange, !joined.isEmpty else { return hit.text }
+
+        // Approximate the character the pointer rests on from its horizontal
+        // position within the hit line's box; RTL scripts read right-to-left,
+        // so the proportion mirrors. Only matters when a sentence boundary
+        // falls mid-line, so an estimate is plenty.
+        let box = hit.boundingBox
+        var relX = box.width > 0 ? (pointer.x - box.minX) / box.width : 0.5
+        relX = min(max(relX, 0), 1)
+        let bucket = ScriptDetector.detectScriptBucket(hit.text)
+        if bucket == .arabic || bucket == .hebrew { relX = 1 - relX }
+        let hitCount = joined.distance(from: hitRange.lowerBound, to: hitRange.upperBound)
+        let offset = min(Int(relX * CGFloat(hitCount)), max(hitCount - 1, 0))
+        let target = joined.index(hitRange.lowerBound, offsetBy: offset)
+
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = joined
+        let sentence = joined[tokenizer.tokenRange(at: target)]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return sentence.isEmpty ? hit.text : sentence
+    }
+
+    /// Whether two vertically adjacent lines belong to the same paragraph:
+    /// the gap between them is under a line-height and they overlap
+    /// horizontally. Column gutters and unrelated UI text fail both.
+    private static func sameParagraph(above: OCRService.Line, below: OCRService.Line) -> Bool {
+        let a = above.boundingBox
+        let b = below.boundingBox
+        let gap = a.minY - b.maxY
+        let overlap = min(a.maxX, b.maxX) - max(a.minX, b.minX)
+        return gap < max(a.height, b.height) * 0.9 && overlap > 0
     }
 
     private static func distance(from point: CGPoint, to box: CGRect) -> CGFloat {

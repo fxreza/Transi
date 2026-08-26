@@ -485,7 +485,8 @@ final class PopupController: ObservableObject {
     /// popup spawns just outside the pointer, so the margin keeps a user who
     /// hasn't moved the mouse from losing the popup they're reading). Once
     /// the pointer stays beyond the zone for the configured delay, close.
-    /// Pin, implicit pin (typing), and an open picker suspend the countdown.
+    /// Pin, an open picker, and actively typing a draft (implicit pin while
+    /// the panel is key) suspend the countdown.
     private func startAutoDismissMonitoring() {
         autoDismissTimer?.invalidate()
         awayAccumulated = 0
@@ -502,7 +503,12 @@ final class PopupController: ObservableObject {
             autoDismissTimer = nil
             return
         }
-        guard settings.autoDismissEnabled, !isPinned, !isImplicitlyPinned, !isPickerOpen else {
+        // The implicit pin (composing with a draft) suspends the countdown
+        // only while the panel is key — i.e. the user is actually typing in
+        // it. Once they click into another app, the countdown runs again;
+        // otherwise an abandoned draft kept the popup on screen forever.
+        guard settings.autoDismissEnabled, !isPinned, !isPickerOpen,
+              !(isImplicitlyPinned && panel.isKeyWindow) else {
             awayAccumulated = 0
             return
         }
@@ -644,8 +650,12 @@ final class PopupController: ObservableObject {
             }
         }
 
-        // Local Esc only works while the panel is key; the capturing phase
-        // never takes key, so a global Esc monitor covers it.
+        // Local Esc handles the staged escape while the panel is key. The
+        // global monitor covers every other case — the capturing phase never
+        // takes key, and a popup left behind after clicking into another app
+        // would otherwise ignore Esc entirely (it was unclosable when the
+        // implicit pin also disabled click-outside). Global monitors never
+        // see our own events, so the two can't both fire.
         if escapeMonitor == nil {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 if event.keyCode == 53 {  // Esc
@@ -655,15 +665,12 @@ final class PopupController: ObservableObject {
                 return event
             }
         }
-        if globalEscapeMonitor == nil, phase == .capturing {
+        if globalEscapeMonitor == nil {
             globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 if event.keyCode == 53 {
                     Task { @MainActor in self?.close() }
                 }
             }
-        } else if phase != .capturing, let globalEscapeMonitor {
-            NSEvent.removeMonitor(globalEscapeMonitor)
-            self.globalEscapeMonitor = nil
         }
     }
 
