@@ -106,7 +106,7 @@ final class SettingsStore: ObservableObject {
         return orderedEnabledEngines.first
     }
 
-    /// For UI gating only — the key itself lives in the Keychain.
+    /// For UI gating only — the key itself lives in the key-file store.
     var hasGeminiKey: Bool { KeychainStore.read(.geminiAPIKey) != nil }
 
     // MARK: - Updates
