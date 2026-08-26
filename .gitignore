@@ -17,3 +17,6 @@ CLAUDE.md
 
 # API keys for local testing (never commit)
 .env
+
+# Release artifacts
+dist/
