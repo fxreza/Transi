@@ -362,6 +362,8 @@ struct PopupView: View {
                 .frame(width: 14)
             }
 
+            historyButton
+
             Spacer()
 
             if let hidden = controller.lastHiddenEngine {
@@ -378,6 +380,99 @@ struct PopupView: View {
         .buttonStyle(.bordered)
         .controlSize(.regular)
         .environment(\.layoutDirection, .leftToRight)
+    }
+
+    // MARK: - History
+
+    @State private var historyOpen = false
+    @ObservedObject private var history = HistoryStore.shared
+
+    /// A popover like the language pickers, and for the same reason: an
+    /// NSMenu dismissed by a click in another app would close the popup too.
+    private var historyButton: some View {
+        Button(action: { historyOpen.toggle() }) {
+            Image(systemName: "clock.arrow.circlepath")
+        }
+        .help("History")
+        .popover(isPresented: $historyOpen, arrowEdge: .bottom) {
+            historyContent
+                .onAppear { controller.isPickerOpen = true }
+                .onDisappear { controller.isPickerOpen = false }
+        }
+    }
+
+    private var historyContent: some View {
+        VStack(spacing: 0) {
+            if history.entries.isEmpty {
+                Text("No history yet.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(16)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(history.entries) { entry in
+                            historyRow(entry)
+                            Divider().padding(.leading, 10)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(width: 320, height: min(CGFloat(history.entries.count) * 46 + 20, 340))
+
+                Divider()
+                HStack {
+                    Text("\(history.entries.count) of \(HistoryStore.maxEntries)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Clear History") {
+                        history.clear()
+                        historyOpen = false
+                    }
+                    .font(.caption)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private func historyRow(_ entry: HistoryEntry) -> some View {
+        HStack(spacing: 6) {
+            Button(action: {
+                historyOpen = false
+                controller.recall(entry)
+            }) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.translatedText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(entry.sourceText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Translate again")
+
+            Button(action: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(entry.translatedText, forType: .string)
+            }) {
+                Image(systemName: "doc.on.doc")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Copy translation")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     private var copyHelp: String {

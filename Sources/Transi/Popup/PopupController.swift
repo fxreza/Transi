@@ -355,6 +355,25 @@ final class PopupController: ObservableObject {
             return
         }
         if update.isPrimary { autoFlipPending = false }
+
+        // After the flip check, so a flipped-away session never records: only
+        // the session whose result the user actually sees reaches this line.
+        if !primaryText.isEmpty {
+            HistoryStore.shared.record(
+                source: sourceText,
+                translation: primaryText,
+                sourceCode: effectiveSourceCode,
+                targetCode: targetCode)
+        }
+    }
+
+    /// Re-run a lookup from the history popover with its original target.
+    /// A live translation (rather than showing the stored text) keeps the
+    /// full card stack, speak, and copy behavior; the coordinator's cache
+    /// usually answers instantly anyway.
+    func recall(_ entry: HistoryEntry) {
+        autoFlipPending = false
+        startTranslation(text: entry.sourceText, target: entry.targetCode)
     }
 
     private func setCard(_ engine: EngineID, status: EngineStatus) {
