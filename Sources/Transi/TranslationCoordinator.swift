@@ -144,8 +144,11 @@ actor TranslationCoordinator {
         if let lastWarmUp, Date().timeIntervalSince(lastWarmUp) < warmUpInterval { return }
         lastWarmUp = Date()
         // A minimal real translate call: cheap, and primes the same connection
-        // pool entry the next request will reuse.
-        _ = try? await engines[.google]?.translate("a", to: "fa", from: LanguageCatalog.autoCode)
+        // pool entry the next request will reuse. Reads the target straight
+        // from UserDefaults (this runs off the main actor, so SettingsStore is
+        // out of reach) rather than hardcoding a language.
+        let target = UserDefaults.standard.string(forKey: "targetLanguage") ?? "en"
+        _ = try? await engines[.google]?.translate("a", to: target, from: LanguageCatalog.autoCode)
     }
 
     // MARK: - Cache
@@ -153,8 +156,11 @@ actor TranslationCoordinator {
     private func cacheKey(_ engine: EngineID, _ source: String, _ target: String, _ text: String) -> String {
         // Tone is part of the key: a Casual and a Standard answer for the
         // same text are different results, and a tone switch must re-fetch
-        // rather than replay the old register from cache.
-        "\(engine.rawValue)|\(TranslationTone.current.rawValue)|\(source)|\(target)|\(text)"
+        // rather than replay the old register from cache. `cacheVariant` does
+        // the same job for per-engine settings (Gemini's model and thinking
+        // level).
+        let variant = engines[engine]?.cacheVariant ?? ""
+        return "\(engine.rawValue)|\(TranslationTone.current.rawValue)|\(variant)|\(source)|\(target)|\(text)"
     }
 
     private func store(_ result: EngineResult, key: String) {

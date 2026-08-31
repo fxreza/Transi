@@ -19,16 +19,17 @@ final class SettingsStore: ObservableObject {
     // MARK: - Languages
 
     /// Canonical catalog code of the default translate-to language.
-    /// Key and raw values ("fa"/"en") are unchanged from the shipped
-    /// two-language version, so upgrades need no migration.
-    @Published var targetLanguage: String = "fa" {
+    /// The UserDefaults key is unchanged from the shipped two-language
+    /// version, so upgrades keep whatever pair the user already had; only the
+    /// *first-run* value changed (it used to be hardcoded "fa" — see
+    /// `Self.systemDefaultPair`).
+    @Published var targetLanguage: String = SettingsStore.systemDefaultPair.target {
         didSet { if isLoaded { defaults.set(targetLanguage, forKey: "targetLanguage") } }
     }
 
-    /// The other half of the user's working pair: when detected source equals
-    /// the target, translation flips here so a bare hotkey press is always
-    /// useful. Defaults to the fa/en partner of `targetLanguage`.
-    @Published var secondaryLanguage: String = "en" {
+    /// The other half of the user's working pair. See `defaultTarget(for:)`
+    /// for how the two combine to pick a direction.
+    @Published var secondaryLanguage: String = SettingsStore.systemDefaultPair.secondary {
         didSet { if isLoaded { defaults.set(secondaryLanguage, forKey: "secondaryLanguage") } }
     }
 
@@ -83,8 +84,14 @@ final class SettingsStore: ObservableObject {
         didSet { if isLoaded { defaults.set(tone.rawValue, forKey: "translationTone") } }
     }
 
-    @Published var geminiModel: String = "gemini-3.7-flash" {
+    @Published var geminiModel: String = GeminiEngine.defaultModel {
         didSet { if isLoaded { defaults.set(geminiModel, forKey: "geminiModel") } }
+    }
+
+    /// How much reasoning Gemini may do before answering. Defaults to `.low`
+    /// — see `GeminiThinking` for the measurements behind that choice.
+    @Published var geminiThinking: GeminiThinking = .low {
+        didSet { if isLoaded { defaults.set(geminiThinking.rawValue, forKey: "geminiThinking") } }
     }
 
     @Published var hasAcknowledgedGeminiPrivacyNote: Bool = false {
@@ -128,6 +135,14 @@ final class SettingsStore: ObservableObject {
     /// Multiplier on the popup's base text sizes (0.8...1.6).
     @Published var popupTextSize: Double = 1.0 {
         didSet { if isLoaded { defaults.set(popupTextSize, forKey: "popupTextSize") } }
+    }
+
+    /// Show the Latin-script romanization Bing and Gemini return under a
+    /// non-Latin translation ("Finglish" for Persian, pinyin for Chinese).
+    /// Off by default: for readers of the target script it is a second line
+    /// of noise under every result.
+    @Published var showTransliteration: Bool = false {
+        didSet { if isLoaded { defaults.set(showTransliteration, forKey: "showTransliteration") } }
     }
 
     /// Renders the popup's controls (language pickers, swap/pin/close, card
@@ -184,13 +199,26 @@ final class SettingsStore: ObservableObject {
         if let raw = defaults.string(forKey: "secondaryLanguage"), LanguageCatalog.byCode[raw] != nil {
             secondaryLanguage = raw
         } else {
-            secondaryLanguage = targetLanguage == "fa" ? "en" : "fa"
+            // No stored secondary: pair whatever target we ended up with
+            // against the system-derived partner.
+            secondaryLanguage = Self.partnerForFirstRun(of: targetLanguage)
         }
         if let stored = defaults.array(forKey: "enabledLanguages") as? [String] {
             enabledLanguageCodes = stored.filter { LanguageCatalog.byCode[$0] != nil }
         }
         if enabledLanguageCodes.isEmpty {
             enabledLanguageCodes = [targetLanguage, secondaryLanguage]
+        }
+        // One-time repair: the popup's source picker used to write every pick
+        // straight into this setting, so a stored fixed source is far more
+        // likely to be an accident from that than a deliberate choice — and a
+        // wrong one silently defeats the whole direction rule (a fixed
+        // "English" makes Persian text translate English→Persian, which the
+        // engines return unchanged). Popup picks are session-scoped now, so
+        // this can only happen once.
+        if !defaults.bool(forKey: "didResetStickySourceLanguage") {
+            defaults.set(true, forKey: "didResetStickySourceLanguage")
+            defaults.removeObject(forKey: "sourceLanguage")
         }
         if let raw = defaults.string(forKey: "sourceLanguage"),
            raw == LanguageCatalog.autoCode || LanguageCatalog.byCode[raw] != nil {
@@ -218,6 +246,10 @@ final class SettingsStore: ObservableObject {
         if let raw = defaults.string(forKey: "geminiModel"), !raw.isEmpty {
             geminiModel = raw
         }
+        if let raw = defaults.string(forKey: "geminiThinking"),
+           let stored = GeminiThinking(rawValue: raw) {
+            geminiThinking = stored
+        }
         hasAcknowledgedGeminiPrivacyNote = defaults.bool(forKey: "geminiPrivacyNoteAcknowledged")
         includePrereleases = defaults.bool(forKey: "includePrereleases")
 
@@ -231,6 +263,7 @@ final class SettingsStore: ObservableObject {
         if storedTextSize > 0 { popupTextSize = min(max(storedTextSize, 0.8), 1.6) }
 
         largePopupControls = defaults.bool(forKey: "largePopupControls")
+        showTransliteration = defaults.bool(forKey: "showTransliteration")
         if defaults.object(forKey: "autoDismissEnabled") != nil {
             autoDismissEnabled = defaults.bool(forKey: "autoDismissEnabled")
         }
@@ -247,5 +280,73 @@ final class SettingsStore: ObservableObject {
     /// A manually picked third language flips back to the secondary.
     func partner(of target: String) -> String {
         target == secondaryLanguage ? targetLanguage : secondaryLanguage
+    }
+
+    /// The non-English half of the configured pair, or nil when the pair has
+    /// no English in it at all.
+    var nonEnglishOfPair: String? {
+        if targetLanguage != Self.englishCode { return targetLanguage }
+        if secondaryLanguage != Self.englishCode { return secondaryLanguage }
+        return nil
+    }
+
+    /// True when English is one of the two configured languages — the
+    /// condition under which the English-anchored rule below applies.
+    var pairIncludesEnglish: Bool {
+        targetLanguage == Self.englishCode || secondaryLanguage == Self.englishCode
+    }
+
+    /// The default target for a capture whose source language is `source`
+    /// (canonical code, already normalized; nil = not determined yet).
+    ///
+    /// English-anchored, per the requested behaviour: when English is one of
+    /// the configured pair, English input goes to the pair's other language
+    /// and *everything else* — including the pair's own non-English half —
+    /// goes to English. When the pair has no English in it (say French +
+    /// German), that rule would ignore the user's settings entirely, so the
+    /// plain pair flip applies instead: source == target flips to the
+    /// secondary, anything else goes to the target.
+    ///
+    /// A nil `source` returns the configured target as a provisional answer;
+    /// the caller re-runs once an engine reports the detected language.
+    func defaultTarget(forSource source: String?) -> String {
+        guard pairIncludesEnglish, let other = nonEnglishOfPair else {
+            guard let source else { return targetLanguage }
+            return source == targetLanguage ? partner(of: targetLanguage) : targetLanguage
+        }
+        // An undetermined source is assumed English: it is the anchor of this
+        // rule and by far the likeliest input, so the common case resolves in
+        // one request whichever way round the pair is configured. The caller
+        // still checks the engine's own detection and re-runs if it disagrees.
+        guard let source else { return other }
+        return source == Self.englishCode ? other : Self.englishCode
+    }
+
+    // MARK: - First-run defaults
+
+    static let englishCode = "en"
+
+    /// First-run language pair, derived from the Mac's own language list so
+    /// nothing ships hardcoded to the author's languages. Target is the
+    /// system UI language when the catalog knows it, English otherwise;
+    /// the secondary is English, or the next preferred system language when
+    /// the system language already IS English.
+    static let systemDefaultPair: (target: String, secondary: String) = {
+        let preferred = Locale.preferredLanguages
+            .map { LanguageCatalog.normalize($0) }
+            .filter { LanguageCatalog.byCode[$0] != nil }
+        let target = preferred.first ?? englishCode
+        return (target, partnerForFirstRun(of: target))
+    }()
+
+    /// English for any non-English target; for an English target, the next
+    /// distinct system language, falling back to Spanish (the most common
+    /// second language among macOS installs) so the pair is never degenerate.
+    static func partnerForFirstRun(of target: String) -> String {
+        guard target == englishCode else { return englishCode }
+        let next = Locale.preferredLanguages
+            .map { LanguageCatalog.normalize($0) }
+            .first { LanguageCatalog.byCode[$0] != nil && $0 != englishCode }
+        return next ?? "es"
     }
 }

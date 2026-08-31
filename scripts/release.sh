@@ -60,14 +60,15 @@ git commit -m "Release $VERSION"
 git tag "v$VERSION"
 echo "Committed the version bump and tagged v$VERSION"
 
-# --- 6. Publish the GitHub release with the zip attached ---------------------
+# --- 6. Push, then publish the GitHub release with the zip attached ----------
+# The tag must be on GitHub before `gh release create` will attach to it, so
+# the push comes first. Cutting a release means pushing it (owner's rule:
+# "push" = push and release).
+git push origin main "v$VERSION"
+
 gh release create "v$VERSION" "$ZIP_PATH" \
     --title "Transi $VERSION" \
     --notes "Release $VERSION."
 
 RELEASE_URL=$(gh release view "v$VERSION" --json url --jq .url)
 echo "Published: $RELEASE_URL"
-
-# Nothing above pushes to the remote — repo rule is to never push without
-# being asked. Push the commit and tag yourself when ready:
-echo "Push with: git push origin main \"v$VERSION\""

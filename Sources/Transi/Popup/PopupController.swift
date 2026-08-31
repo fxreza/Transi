@@ -18,7 +18,7 @@ final class PopupController: ObservableObject {
     /// First detected source language to arrive (first writer wins, so the
     /// header never flickers when a second engine disagrees).
     @Published private(set) var resolvedSourceCode: String?
-    @Published var targetCode: String = "fa"
+    @Published var targetCode: String = SettingsStore.shared.targetLanguage
     @Published private(set) var spellingSuggestion: String?
     @Published private(set) var popupError: PopupError?
 
@@ -57,6 +57,14 @@ final class PopupController: ObservableObject {
     /// True while the auto-flip decision is deferred to the server's detected
     /// language (ambiguous script). Consumed by the first primary result.
     private var autoFlipPending = false
+    /// A source language picked inside the popup. Session-scoped on purpose:
+    /// popup pickers steer the current lookup only, they never rewrite the
+    /// defaults in Settings, so the next capture starts from the configured
+    /// pair again. nil = follow `settings.sourceLanguage`.
+    private var sessionSourceOverride: String?
+    /// Set once the user picks a target by hand, so the deferred auto-flip
+    /// can't overrule the choice they just made.
+    private var hasManualTarget = false
     private var undoChipTask: Task<Void, Never>?
     private var autoDismissTimer: Timer?
     /// Seconds the pointer has spent continuously outside the dismiss zone.
@@ -119,10 +127,14 @@ final class PopupController: ObservableObject {
         settings.primaryEngine(forTarget: targetCode)
     }
 
+    /// The source setting this session actually runs with: the popup's own
+    /// pick when there is one, else the configured default.
+    var sourceSetting: String { sessionSourceOverride ?? settings.sourceLanguage }
+
     var effectiveSourceCode: String? {
-        settings.sourceLanguage == LanguageCatalog.autoCode
+        sourceSetting == LanguageCatalog.autoCode
             ? resolvedSourceCode.map(LanguageCatalog.normalize)
-            : settings.sourceLanguage
+            : sourceSetting
     }
 
     var canSpeak: Bool { !primaryText.isEmpty }
@@ -167,48 +179,61 @@ final class PopupController: ObservableObject {
 
     // MARK: - Translation flow
 
-    /// Translates freshly-captured text to the user's default target,
-    /// auto-flipping to the pair's other language when the text already IS
-    /// the target, so a bare hotkey press always gives a useful result.
+    /// Translates freshly-captured text to the direction
+    /// `SettingsStore.defaultTarget(forSource:)` prescribes: with English in
+    /// the configured pair, English input goes to the pair's other language
+    /// and anything else goes to English.
+    ///
+    /// The source language is guessed locally from the script where that is
+    /// unambiguous, so the common cases cost zero extra requests; only a
+    /// genuinely ambiguous guess defers to the server's detection.
     func translateAndDisplay(text: String) async {
         sourceText = text
         phase = .ready
+        hasManualTarget = false
 
-        let chosen = settings.targetLanguage
-        var target = chosen
-        autoFlipPending = false
-
-        // Decide the flip locally from the script where possible, so "already
-        // in the target language" costs zero extra requests.
-        if settings.sourceLanguage == LanguageCatalog.autoCode {
-            if let detected = ScriptDetector.detect(text) {
-                if LanguageCatalog.matchesLanguage(detected, chosen) {
-                    target = settings.partner(of: chosen)
-                }
-            } else if let bucket = ScriptDetector.detectScriptBucket(text) {
-                // Safe locally only when exactly one enabled language uses
-                // this script; otherwise the server's verdict decides.
-                let candidates = settings.enabledLanguages.filter {
-                    LanguageCatalog.script(for: $0) == bucket
-                }
-                if candidates.count == 1 {
-                    if candidates[0] == chosen { target = settings.partner(of: chosen) }
-                } else {
-                    autoFlipPending = true
-                }
-            } else {
-                autoFlipPending = true
-            }
-        }
-
-        startTranslation(text: text, target: target)
+        // Under auto-detect the local guess only decides which direction to
+        // try FIRST — the engine's own detection is always checked against it
+        // in `apply`, and disagreement re-runs. That matters here: Latin text
+        // is guessed as English whenever English is the one enabled Latin
+        // language, so without the check a French selection would go to the
+        // pair's non-English half instead of to English.
+        let guess = localSourceGuess(for: text)
+        autoFlipPending = (sourceSetting == LanguageCatalog.autoCode)
+        startTranslation(text: text, target: settings.defaultTarget(forSource: guess))
     }
 
-    /// User explicitly picked a target: honor it exactly, no auto-flip, and
-    /// remember it as the default for the next capture.
+    /// A local, network-free source-language guess, or nil when the script
+    /// can't settle it and the server has to.
+    ///
+    /// A fixed source setting needs no guessing at all. Under auto detect,
+    /// the direction rule only ever has to distinguish "English" from "not
+    /// English", so any non-Latin script answers the question outright — only
+    /// Latin text is genuinely ambiguous, and even then a single enabled
+    /// Latin language settles it.
+    private func localSourceGuess(for text: String) -> String? {
+        let setting = sourceSetting
+        guard setting == LanguageCatalog.autoCode else { return setting }
+
+        if let detected = ScriptDetector.detect(text) { return detected }
+        guard let bucket = ScriptDetector.detectScriptBucket(text) else { return nil }
+
+        let candidates = settings.enabledLanguages.filter {
+            LanguageCatalog.script(for: $0) == bucket
+        }
+        if candidates.count == 1 { return candidates[0] }
+        // Non-Latin scripts can't be English, and "not English" is all the
+        // rule needs — any candidate from the bucket answers it identically.
+        if bucket != .latin, let first = candidates.first { return first }
+        return nil
+    }
+
+    /// User explicitly picked a target: honor it exactly and hold it for the
+    /// rest of this popup, but do NOT write it to Settings — the next capture
+    /// starts from the configured default direction again.
     func retranslate(to target: String) {
         guard !sourceText.isEmpty else { return }
-        settings.targetLanguage = target
+        hasManualTarget = true
         autoFlipPending = false
         startTranslation(text: sourceText, target: target)
     }
@@ -222,21 +247,29 @@ final class PopupController: ObservableObject {
         startTranslation(text: sourceText, target: targetCode)
     }
 
-    /// User picked a source language ("auto" or a fixed code).
+    /// User picked a source language ("auto" or a fixed code). Session-scoped
+    /// like the target pick: it steers this popup, Settings keeps the default.
+    /// Re-runs through the direction rule unless the user has already pinned a
+    /// target by hand.
     func setSource(_ code: String) {
-        settings.sourceLanguage = code
+        sessionSourceOverride = code
         autoFlipPending = false
         objectWillChange.send()
-        if !sourceText.isEmpty { startTranslation(text: sourceText, target: targetCode) }
+        guard !sourceText.isEmpty else { return }
+        if hasManualTarget {
+            startTranslation(text: sourceText, target: targetCode)
+        } else {
+            Task { await translateAndDisplay(text: sourceText) }
+        }
     }
 
     /// Swap source and target. With an auto source, the detected language
-    /// becomes the new fixed source.
+    /// becomes the new fixed source. Session-scoped, like the two pickers it
+    /// stands between.
     func swapLanguages() {
         guard let source = effectiveSourceCode else { return }
-        let oldTarget = targetCode
-        settings.sourceLanguage = oldTarget
-        settings.targetLanguage = source
+        sessionSourceOverride = targetCode
+        hasManualTarget = true
         autoFlipPending = false
         if !sourceText.isEmpty {
             startTranslation(text: sourceText, target: source)
@@ -266,7 +299,7 @@ final class PopupController: ObservableObject {
         setCard(engine, status: .loading)
         let text = sourceText
         let target = targetCode
-        let source = settings.sourceLanguage
+        let source = sourceSetting
         Task { @MainActor in
             do {
                 let result = try await TranslationCoordinator.shared.translate(
@@ -315,7 +348,7 @@ final class PopupController: ObservableObject {
             return
         }
 
-        let source = settings.sourceLanguage
+        let source = sourceSetting
         streamTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let stream = await TranslationCoordinator.shared.translateAll(
@@ -344,15 +377,19 @@ final class PopupController: ObservableObject {
             if update.isPrimary { primaryEngine = update.engine }
         }
 
-        // Deferred auto-flip: only the ambiguous-script case reaches here,
-        // and only the first primary result carries the verdict.
-        if autoFlipPending, update.isPrimary,
+        // Deferred direction: only the ambiguous-script case reaches here,
+        // and only the first primary result carries the verdict. Re-runs the
+        // same rule `translateAndDisplay` used, now with a real source.
+        if autoFlipPending, !hasManualTarget, update.isPrimary,
            case .success(let result) = update.outcome,
-           let detected = result.detectedSourceLanguage,
-           LanguageCatalog.matchesLanguage(detected, targetCode) {
+           let detected = result.detectedSourceLanguage {
             autoFlipPending = false
-            startTranslation(text: sourceText, target: settings.partner(of: targetCode))
-            return
+            let corrected = settings.defaultTarget(
+                forSource: LanguageCatalog.normalize(detected))
+            if corrected != targetCode {
+                startTranslation(text: sourceText, target: corrected)
+                return
+            }
         }
         if update.isPrimary { autoFlipPending = false }
 
@@ -373,6 +410,7 @@ final class PopupController: ObservableObject {
     /// usually answers instantly anyway.
     func recall(_ entry: HistoryEntry) {
         autoFlipPending = false
+        hasManualTarget = true
         startTranslation(text: entry.sourceText, target: entry.targetCode)
     }
 
@@ -545,6 +583,10 @@ final class PopupController: ObservableObject {
         lastHiddenEngine = nil
         sessionHiddenEngines = []
         autoFlipPending = false
+        // Popup-only language picks last exactly one popup: a fresh session
+        // always starts from the configured default pair again.
+        sessionSourceOverride = nil
+        hasManualTarget = false
         isPinned = false
         isPickerOpen = false
         targetCode = settings.targetLanguage

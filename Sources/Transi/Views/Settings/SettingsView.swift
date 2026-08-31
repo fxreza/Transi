@@ -40,7 +40,10 @@ struct SettingsView: View {
             AboutFooter()
                 .padding(.vertical, 10)
         }
-        .frame(width: 560, height: 480)
+        // Tall enough for the Languages tab, whose enabled-language list has
+        // to share the height with the Defaults form rather than scrolling
+        // with it. Every other tab simply scrolls, so extra height only helps.
+        .frame(width: 560, height: 600)
     }
 }
 

@@ -53,7 +53,7 @@ struct PopupView: View {
         HStack(spacing: 6) {
             LanguagePickerButton(
                 title: sourceLabel,
-                selectedCode: settings.sourceLanguage,
+                selectedCode: controller.sourceSetting,
                 includeAuto: true,
                 controller: controller
             ) { code in
@@ -119,13 +119,13 @@ struct PopupView: View {
             HStack(spacing: 2) {
                 Image(systemName: "textformat")
                     .font(.system(size: 11 * ctrl))
-                if settings.tone != .standard {
-                    Text(settings.tone.label)
-                }
+                // Standard used to render as a bare icon, which left the
+                // control unlabelled in its most common state.
+                Text(settings.tone.label)
                 Image(systemName: "chevron.down").font(.system(size: 9 * ctrl))
             }
             .font(.system(size: 12 * ctrl))
-            .foregroundColor(settings.tone == .standard ? .secondary : .accentColor)
+            .foregroundColor(.accentColor)
         }
         .buttonStyle(.plain)
         .help("Tone — applies to Bing and Gemini")
@@ -169,13 +169,13 @@ struct PopupView: View {
     }
 
     private var sourceLabel: String {
-        if settings.sourceLanguage == LanguageCatalog.autoCode {
+        if controller.sourceSetting == LanguageCatalog.autoCode {
             if let detected = controller.effectiveSourceCode {
                 return "Auto · \(LanguageCatalog.englishName(for: detected))"
             }
             return "Auto"
         }
-        return LanguageCatalog.englishName(for: settings.sourceLanguage)
+        return LanguageCatalog.englishName(for: controller.sourceSetting)
     }
 
     // MARK: - Body
@@ -576,14 +576,11 @@ private struct LanguagePickerButton: View {
 
     private var pickerContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if settings.enabledLanguages.count > 8 {
-                TextField("Search", text: $query)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(8)
-            }
+            LanguageSearchField(text: $query, prompt: "Search")
+                .padding(8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if includeAuto, query.isEmpty {
+                    if includeAuto, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         row(code: LanguageCatalog.autoCode, label: "Auto Detect")
                         Divider().padding(.vertical, 2)
                     }
@@ -611,12 +608,15 @@ private struct LanguagePickerButton: View {
 
     private var filteredCodes: [String] {
         let codes = settings.enabledLanguages
-        guard !query.isEmpty else { return codes }
+        // Trimmed: a stray space (or macOS turning a double space into ". ")
+        // used to filter the whole list away and read as lost settings.
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return codes }
         return codes.filter {
             guard let lang = LanguageCatalog.language(for: $0) else { return false }
-            return lang.englishName.localizedCaseInsensitiveContains(query)
-                || lang.nativeName.localizedCaseInsensitiveContains(query)
-                || lang.code.localizedCaseInsensitiveContains(query)
+            return lang.englishName.localizedCaseInsensitiveContains(needle)
+                || lang.nativeName.localizedCaseInsensitiveContains(needle)
+                || lang.code.localizedCaseInsensitiveContains(needle)
         }
     }
 

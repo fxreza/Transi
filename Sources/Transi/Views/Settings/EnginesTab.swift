@@ -15,6 +15,7 @@ struct EnginesTab: View {
     private static let geminiModels: [(id: String, label: String)] = [
         ("gemini-3.7-flash", "3.7 Flash"),
         ("gemini-3.6-flash", "3.6 Flash"),
+        ("gemini-3.5-flash", "3.5 Flash"),
         ("gemini-3.5-flash-lite", "3.5 Flash-Lite"),
     ]
 
@@ -64,6 +65,15 @@ struct EnginesTab: View {
                         Text(model.label).tag(model.id)
                     }
                 }
+
+                Picker("Thinking", selection: $settings.geminiThinking) {
+                    ForEach(GeminiThinking.allCases) { level in
+                        Text(level.label).tag(level)
+                    }
+                }
+                Text(thinkingHint)
+                    .font(.caption)
+                    .foregroundStyle(settings.geminiThinking == .medium ? .orange : .secondary)
             }
 
             Section("Per-Language Primary Engine") {
@@ -77,6 +87,26 @@ struct EnginesTab: View {
         }
         .formStyle(.grouped)
         .onAppear { draftKey = KeychainStore.read(.geminiAPIKey) ?? "" }
+    }
+
+    /// Gemini reasons silently before it writes anything, so this is a speed
+    /// control first. The per-level notes are what testing actually showed,
+    /// not guesses.
+    private var thinkingHint: String {
+        switch settings.geminiThinking {
+        case .off:
+            return "Answers immediately. Fastest on short text, but the model "
+                + "sometimes pads the romanization instead of thinking."
+        case .low:
+            return "Recommended. Scales with the text — matched the slower "
+                + "levels on idioms and ambiguous wording, in a fraction of the time."
+        case .medium:
+            return "Slowest by far, and seen looping until it hit the output "
+                + "limit. Kept for completeness; Low or High are the safer picks."
+        case .high:
+            return "The old behaviour. Slightly more idiomatic phrasing on "
+                + "figures of speech, several seconds slower per translation."
+        }
     }
 
     // MARK: - Engine row

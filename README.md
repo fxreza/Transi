@@ -22,13 +22,21 @@ from it and no affiliation with its authors.
   streaming in as each finishes. Drag a card by its name badge to reorder
   permanently; hide any card for the session or disable an engine for good
   - **Google** — keyless web endpoint; dictionary entries and spell suggestions
-  - **Bing / Microsoft Translator** — keyless web endpoint; Persian
-    transliteration, dictionary, and the **Casual / Formal tone** control from
-    the Bing Translator website
+  - **Bing / Microsoft Translator** — keyless web endpoint; romanization of
+    non-Latin translations (off by default), dictionary, and the
+    **Casual / Formal tone** control from the Bing Translator website
   - **Gemini** — your own free [AI Studio](https://aistudio.google.com/apikey)
     key (stored in the Keychain), model selectable, honors the tone setting
-- **~109 languages** with auto-detect, an enable/disable list so pickers stay
-  short, a source⇄target swap, and per-language primary-engine overrides
+- **~109 languages** with auto-detect, a searchable enable/disable list (with
+  Select All / Select None) so pickers stay short, searchable pickers in the
+  popup itself, a source⇄target swap, and per-language primary-engine overrides
+- **One default direction, always** — you set a *Translate to* language and a
+  *Second language* in Settings. With English as one of the two, English text
+  goes to the other language and everything else goes to English; a pair
+  without English simply flips between its two members. Picking a different
+  language inside the popup applies to that popup only — the next translation
+  starts from your default again. On a fresh install the pair is derived from
+  your Mac's own language settings
 - **Screenshot OCR translate** — **⌥S**, drag a rectangle over any on-screen
   text (image, video, unselectable UI). Recognized on-device via Vision, then
   translated
@@ -42,8 +50,7 @@ from it and no affiliation with its authors.
   Engines, Shortcuts, Appearance, Permissions — launch at login, accent/theme,
   text and control sizes, popup auto-close delay
 - **Popup niceties** — pin to keep it open, auto-close when the mouse leaves
-  (configurable delay), auto language flip (Persian text auto-translates back
-  to English and vice versa), "Did you mean…" spell suggestions, RTL rendering,
+  (configurable delay), "Did you mean…" spell suggestions, RTL rendering,
   per-card copy/speak
 - **Built-in updates** — checks GitHub Releases daily; one-click install
 

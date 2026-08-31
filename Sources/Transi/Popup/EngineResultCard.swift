@@ -12,6 +12,8 @@ struct EngineResultCard: View {
     let controlScale: Double
     @Binding var draggingEngine: EngineID?
 
+    @ObservedObject private var settings = SettingsStore.shared
+
     @State private var isHovering = false
 
     var body: some View {
@@ -113,7 +115,7 @@ struct EngineResultCard: View {
                 .foregroundColor(.accentColor)
             }
 
-            if let transliteration = result.transliteration {
+            if settings.showTransliteration, let transliteration = result.transliteration {
                 // Romanization is Latin script — never inherits RTL layout.
                 Text(transliteration)
                     .font(.system(size: 12 * textScale))
@@ -144,6 +146,11 @@ struct EngineResultCard: View {
             Spacer(minLength: 0)
             if case .notConfigured = error {
                 Button("Add API Key…") { SettingsWindowController.show(tab: .engines) }
+                    .controlSize(.small)
+            } else if case .modelBusy = error {
+                // Retrying a model Google has no capacity for just repeats the
+                // wait; the useful action is switching model.
+                Button("Change Model…") { SettingsWindowController.show(tab: .engines) }
                     .controlSize(.small)
             } else {
                 Button("Retry") { controller.retry(engine: card.id) }

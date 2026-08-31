@@ -27,6 +27,13 @@ struct AppearanceTab: View {
                     .font(.system(size: 16 * settings.popupTextSize))
             }
 
+            Section("Results") {
+                Toggle("Show romanization under translations", isOn: $settings.showTransliteration)
+                Text("Bing and Gemini can return a Latin-script reading of the translation — Finglish for Persian, pinyin for Chinese. Off by default; Google never returns one.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Popup Window") {
                 Toggle("Larger buttons and controls", isOn: $settings.largePopupControls)
                 Text("Enlarges the language pickers, swap, pin, and the icons on result cards — without changing the text size above.")
